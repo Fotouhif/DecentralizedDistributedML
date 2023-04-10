@@ -1,0 +1,161 @@
+cd /work/baskarg/fotouhif/DOM_CDMSGD/DSMA_large_data
+
+salloc -N 1 -n 32 -p priority-a100 --gres gpu:a100:4 -A baskargroup-a100gpu -t 24:00:00 --mail-user=fotouhif@iastate.edu --mail-type=ALL
+
+or 
+
+salloc -N 1 -n 16 --gres=gpu:v100:2 -t 00:10:00 -p gpu
+
+module load singularity
+
+This one works with the gpu: 
+$singularity exec --nv -B /work/baskarg/fotouhif/singularity_container:/work/baskarg/fotouhif/singularity_container /work/baskarg/fotouhif/singularity_container/py_1_7_tfbase.img python3.7 -m torch.distributed.launch --nnodes 1 --nproc_per_node 5 main.py --experiment 1 --epochs 20 --opt CDMSGD --use_cuda
+
+SINGULARITYENV_CUDA_VISIBLE_DEVICES=0 singularity exec --nv -B /work/baskarg/fotouhif/singularity_container:/work/baskarg/fotouhif/singularity_container /work/baskarg/fotouhif/singularity_container/py_1_7_tfbase.img python3.7 -m torch.distributed.launch --nnodes 1 --nproc_per_node 5 main.py --experiment 1 --epochs 20 --opt CDMSGD --use_cuda
+
+For training on ImageNet:
+singularity exec --nv -B /work/baskarg/fotouhif/singularity_container:/work/baskarg/fotouhif/singularity_container /work/baskarg/fotouhif/singularity_container/py_1_7_tfbase.img python3.7 -m torch.distributed.launch --nnodes 1 --nproc_per_node 5 main.py --experiment 1 --epochs 20 --opt CDMSGD --use_cuda --data ImageNet
+
+Training with nohup
+nohup singularity exec --nv -B /work/baskarg/fotouhif/singularity_container:/work/baskarg/fotouhif/singularity_container /work/baskarg/fotouhif/singularity_container/py_1_7_tfbase.img python3.7 -m torch.distributed.launch --nnodes 1 --nproc_per_node 5 main.py --experiment 1 --epochs 500 --opt CDMSGD --use_cuda --data ImageNet --batch_size 512 > out/result.txt &
+
+##############################################
+Fix GPU error in Nova
+Error: CUDA capability sm_80 is not compatible with the current PyTorch installation.
+The current PyTorch install supports CUDA capabilities sm_37 sm_50 sm_60 sm_61 sm_70 sm_75 compute_37.
+If you want to use the A100-SXM4-80GB GPU with PyTorch, please check the instructions at https://pytorch.org/get-started/locally/
+
+When I check the Cuda version in singularity it is: '1.12.1+cu102'
+Also, 
+
+"torch.cuda.is_available()" result is True.
+
+"torch.cuda.device_count()" is 4.
+
+with "torch.cuda.current_device()" I got the same error.
+
+Other commands for checking GPU:
+
+$ "torch.cuda.get_device_name(0)"
+'NVIDIA A100-SXM4-80GB'
+
+#Additional Info when using cuda
+# setting device on GPU if available, else CPU
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print('Using device:', device)
+print()
+if device.type == 'cuda':
+    print(torch.cuda.get_device_name(0))
+    print('Memory Usage:')
+    print('Allocated:', round(torch.cuda.memory_allocated(0)/1024**3,1), 'GB')
+    print('Cached:   ', round(torch.cuda.memory_reserved(0)/1024**3,1), 'GB')
+
+I figured out I need to install a new version of torch that works well with CUDA 11.6
+###########################
+Watching using gpus live:
+
+$ watch -n 2 nvidia-smi
+
+or 
+
+$ watch -n 3 nvidia-smi --query-gpu=index,gpu_name,memory.total,memory.used,memory.free,temperature.gpu,pstate,utilization.gpu,utilization.memory --format=csv
+
+#############################
+I finally reinstalled torch package in singularity using the below command (I got this error "Could not install packages due to an OSError: [Errno 122] Disk quota exceeded:"):
+
+First I clear the cache:
+
+$singularity exec /work/baskarg/fotouhif/singularity_container/py_1_7_tfbase.img python3.7 -m pip cache purge
+
+Then I installed the package:
+
+$singularity exec /work/baskarg/fotouhif/singularity_container/py_1_7_tfbase.img python3.7 -m pip install torch==1.12.1+cu116 torchvision==0.13.1+cu116 torchaudio==0.12.1 --extra-index-url https://download.pytorch.org/whl/cu116 --no-cache-dir
+###########################
+
+Other options for slurm:
+
+more info regarding one partition
+$sinfo -lNp priority-a100
+
+ Show idle nodes:
+$sinfo --states=idle
+
+To see module you loaded:
+$module list
+
+If you want to clear the modules you used
+$module purge
+
+If you want all the memory in the node use:
+--mem=0
+
+It is better to make some part of memory free to make sure you will not have overload error
+
+If you want to have output and error in two differet files you can use --output and --error together
+
+We can add some vaiables about the job id and nodelist for example to your batch file for documentation, like:
+
+SLURM_JOB_ID
+SLURM_JOB_NODELIST
+SLURM_CPUS_PER_TASK
+
+you can add line like
+
+echo "job id: $SLURM_JOB_ID"
+
+To make shortcut for some command you can use alias like:
+
+alias myq="squeue -u $USER"
+
+So, instead of squeue -u $USER you can simply use myq
+
+To kind of figure out your jon priority when it is pending you can figure it out by a 0-1 value. If the value is closer to 1 it means your job has a good priority
+
+$sprio -j {job id} -n
+
+To get some information about te running jon
+
+$sstat -j {job id} (I dont know why it is not working for me)
+
+you can use --format with sstat that you can see specific things like mem cpu, ...
+
+For your past jobs you can get the similar info with sacct instead of sstat
+you can pass some options with that iike --starttime --endtime --brief --state
+
+you can also use --format iwth that
+
+*************************
+to display job efficiency info for past jobs (CPU and memory usage) you can use 
+
+seff {job id}
+it is useful bcause the other time that you want to submit the similar job you have sense about ho much CPU and memory you acutally need and reduce the queue time
+
+*************************
+
+If you want to get some infomration about the node/partition/job configuration and limitation you can use scontrol
+
+scontrol show partition {partition name}
+scontrol show node {node name}
+scontrol show job {job is}
+
+
+When you want to edit your job a little bit and it is in the queue you can use 
+$scontrol hold {job id}
+It actually keeps your job in the queue and after you are done with the editting you can use 
+$scontrol release {job id}
+
+
+*******************************************
+Job dependency
+
+When you have one job that depends on the state of another job you can use this dependency job running.
+
+Examples:
+
+When a job is completed and you want to run another job after the previous one was completed:
+
+sbatch --dependency=afterok:{previous job id} {new job}.job
+
+you can use another option like if the previous job fails, time out ,...
+
+sbatch --dependency=afternotok:{previous job id} {new job}.job
