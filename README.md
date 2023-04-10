@@ -1,1 +1,1 @@
-# Decentralized Distributed Deep Learning
+# Decentralized Distributed Learning
